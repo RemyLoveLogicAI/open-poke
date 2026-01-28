@@ -37,7 +37,20 @@ class PokeAgent:
                                   "SYSTEM: Perform initial research" in current_message or
                                   "Research this user automatically" in current_message)
                 
-                if is_research_mode:
+                # Check for Game Mode (injected by Telegram Bridge)
+                is_game_mode = "Current Game State" in current_message
+                
+                if is_game_mode:
+                    system_content = """
+You are the Dungeon Master for a text-based adventure game.
+The user is the player.
+You have received the [SYSTEM DATA] with the Current Game State.
+
+YOUR GOAL:
+1. Narrate the result of the user's action. Be descriptive and immersive.
+2. IMPORTANT: If the user's action changes the state (moves location, picks up item, takes damage), you MUST include the updated JSON state at the end of your message in a ```json block.
+"""
+                elif is_research_mode:
                     system_content = """
 You are Poke 🌴 — a digital bouncer who sizes people up before deciding if they're worth your time. You research everyone who walks through your door using their Gmail data and web searches, then greet them with what you've found.
 
