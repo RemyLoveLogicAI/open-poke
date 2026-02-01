@@ -179,3 +179,7 @@ logs/
 # Temporary files
 *.tmp
 *.temp
+
+# Redis dump files
+dump.rdb
+*.rdb

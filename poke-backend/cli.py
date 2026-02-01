@@ -3,7 +3,7 @@
 import asyncio
 import os
 import sys
-from typing import Optional
+from typing import Optional, Dict
 import argparse
 import uuid
 from datetime import datetime
@@ -14,7 +14,7 @@ import random
 sys.path.append(os.path.join(os.path.dirname(__file__), 'server'))
 
 from server.agent import PokeAgent
-from server.models import User
+from server.models import User, UserMemory
 from server.connection import initiate_connection, get_connection_status
 from composio import Composio
 
@@ -25,6 +25,24 @@ class PokeChat:
         self.composio_client = Composio()
         self.current_user_id = None
         self.gmail_connected = False
+        # In-memory storage (replaces Redis)
+        self.users: Dict[str, User] = {}
+        self.memories: Dict[str, UserMemory] = {}
+    
+    def save_user(self, user: User) -> bool:
+        """Save user to in-memory storage"""
+        self.users[user.connection_id] = user
+        return True
+    
+    def get_user(self, user_id: str) -> Optional[User]:
+        """Get user from in-memory storage"""
+        return self.users.get(user_id)
+    
+    def get_user_memory(self, user_id: str) -> UserMemory:
+        """Get user memory from in-memory storage"""
+        if user_id not in self.memories:
+            self.memories[user_id] = UserMemory(user_id=user_id)
+        return self.memories[user_id]
     
     def print_slow(self, text: str, delay: float = 0.03):
         """Print text with typing effect"""
@@ -48,17 +66,15 @@ class PokeChat:
         
         # Get basic info
         name = input("\n👤 What's your name? ").strip()
-        email = input("📧 What's your email? (optional) ").strip() or None
         
         # Create user
         user_id = str(uuid.uuid4())
         user = User(
             connection_id=user_id,
-            name=name or "User",
-            email=email
+            name=name or "User"
         )
         
-        success = self.redis_client.save_user(user)
+        success = self.save_user(user)
         if success:
             self.current_user_id = user_id
             self.print_slow(f"\n✨ Great to meet you, {name}!")
@@ -102,12 +118,11 @@ class PokeChat:
                     print("🤖 analyzing your emails and searching online...", end='', flush=True)
                     
                     # Get user info for research
-                    user = self.redis_client.get_user(user_id)
+                    user = self.get_user(user_id)
                     user_name = user.name if user and user.name else "User"
-                    user_email = user.email if user and user.email else ""
                     
                     # Simple research prompt - let Poke's personality system handle the details
-                    research_prompt = f"Research and greet {user_name} ({user_email}) - use your Gmail tools to learn about them and give your signature introduction."
+                    research_prompt = f"Research and greet {user_name} - use your Gmail tools to learn about them and give your signature introduction."
                     
                     research_results = await self.agent.process_message(user_id, research_prompt)
                     
@@ -183,7 +198,7 @@ class PokeChat:
     
     async def send_proactive_intro(self, user_id: str):
         """Send an initial proactive introduction message"""
-        user = self.redis_client.get_user(user_id)
+        user = self.get_user(user_id)
         if user and user.name:
             intro_prompt = f"Generate a friendly, personal introduction message for {user.name}. Ask them about their day or what they'd like help with. Be warm and conversational."
         else:
@@ -195,8 +210,8 @@ class PokeChat:
     
     async def show_user_info(self, user_id: str):
         """Show user information and memory"""
-        user = self.redis_client.get_user(user_id)
-        memory = self.redis_client.get_user_memory(user_id)
+        user = self.get_user(user_id)
+        memory = self.get_user_memory(user_id)
         
         if not user:
             print("❌ User not found")
@@ -205,19 +220,9 @@ class PokeChat:
         print(f"\n👤 User Information:")
         print(f"ID: {user.connection_id}")
         print(f"Name: {user.name}")
-        print(f"Email: {user.email}")
-        print(f"Phone: {user.phone}")
-        print(f"Created: {user.created_at}")
-        print(f"Updated: {user.updated_at}")
         
         print(f"\n🧠 Memory & Insights:")
-        print(f"Insights: {len(memory.insights)} items")
         print(f"Conversation history: {len(memory.conversation_history)} messages")
-        
-        if memory.insights:
-            print("\n📝 Key insights:")
-            for key, value in memory.insights.items():
-                print(f"  • {key}: {value}")
 
 
 async def main():
@@ -253,7 +258,6 @@ async def advanced_main():
     parser = argparse.ArgumentParser(description="Poke AI - Advanced Mode")
     parser.add_argument("--user-id", help="Use existing user ID")
     parser.add_argument("--name", help="Name for new user")
-    parser.add_argument("--email", help="Email for new user")
     parser.add_argument("--no-gmail", action="store_true", help="Skip Gmail setup")
     parser.add_argument("--info-only", action="store_true", help="Show user info only")
     
@@ -267,9 +271,9 @@ async def advanced_main():
     
     # Handle existing user
     if args.user_id:
-        user = poke.redis_client.get_user(args.user_id)
+        user = poke.get_user(args.user_id)
         if not user:
-            print(f"❌ User {args.user_id} not found")
+            print(f"❌ User {args.user_id} not found (note: in-memory storage doesn't persist between sessions)")
             return
         poke.current_user_id = args.user_id
         
@@ -283,8 +287,8 @@ async def advanced_main():
         # Create new user
         if args.name:
             user_id = str(uuid.uuid4())
-            user = User(connection_id=user_id, name=args.name, email=args.email)
-            poke.redis_client.save_user(user)
+            user = User(connection_id=user_id, name=args.name)
+            poke.save_user(user)
             poke.current_user_id = user_id
         else:
             user_id = await poke.setup_user()

@@ -14,5 +14,5 @@ composio = Composio(
 
 openai = ChatOpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
-    model='gpt-5'
+    model=os.getenv("OPENAI_MODEL", "gpt-4-turbo")
 )
